@@ -1,25 +1,53 @@
+mapgen_settings = {
+    autoplace_controls = {},
+    default_enable_all_autoplace_controls = false,
+    width = 256,
+    height = 256,
+}
+
 script.on_init(function()
     storage.coins = 0
     storage.belt_count = 0
+    storage.sell_chests = {}
     storage.nauvis_surface = game.get_surface("nauvis")
-    storage.mining_surface = game.create_surface("mining", {
-        autoplace_controls = {},
-        default_enable_all_autoplace_controls = false,
-        width = 256,
-        height = 256,
-    })
+    storage.mining_surface = game.create_surface("mining", mapgen_settings)
+
+    storage.shop_ui = { type = "button", caption = "Button" }
+    storage.show_ui = false
+    -- game.players[1].gui.top.add({ type = "button", caption = "Button" })
 end)
 
+local function inc_toggle_interface(event)
+    local player = game.get_player(event.player_index)
 
-local linked_belt_filter = {
-    { filter = "name", name = "linked-belt" },
-    { filter = "name", name = "fast-linked-belt",    mode = "or" },
-    { filter = "name", name = "express-linked-belt", mode = "or" },
-    { filter = "name", name = "turbo-linked-belt",   mode = "or" }
-}
+    if not player then
+        return
+    end
+
+    if storage.show_ui then
+        player.gui.screen.children[1].destroy()
+    else
+        player.gui.screen.add(storage.shop_ui)
+    end
+    storage.show_ui = not storage.show_ui
+
+    -- player.gui.top.add { type = "label", name = "greeting", caption = "Hi" }
+    -- player.gui.top.greeting.caption = "Hello there!"
+    -- player.gui.top["greeting"].caption = "Actually, never mind, I don't like your face"
+    -- local tabbed_pane = player.gui.top.add { type = "tabbed-pane" }
+    -- local tab1 = tabbed_pane.add { type = "tab", caption = "Tab 1" }
+    -- local tab2 = tabbed_pane.add { type = "tab", caption = "Tab 2" }
+    -- local label1 = tabbed_pane.add { type = "label", caption = "Label 1" }
+    -- local label2 = tabbed_pane.add { type = "label", caption = "Label 2" }
+    -- tabbed_pane.add_tab(tab1, label1)
+    -- tabbed_pane.add_tab(tab2, label2)
+end
+
+script.on_event("inc_toggle_interface", inc_toggle_interface)
 
 local function on_linked_belt_built(event)
-    game.print("Built entity: " .. event.entity.name)
+    -- game.print("Built entity: " .. event.entity.name)
+    local force = game.players[event.player_index].force
     local belt = event.entity
     belt.linked_belt_type = "output"
 
@@ -38,11 +66,13 @@ local function on_linked_belt_built(event)
         return
     end
 
+    -- spawn neighbor belt
+    local spawn_x = storage.belt_count
     local input_belt = storage.mining_surface.create_entity({
         name = belt.name,
-        position = { x = storage.belt_count, y = 0 },
+        position = { x = spawn_x, y = 0 },
         direction = defines.direction.north,
-        force = game.players[event.player_index].force
+        force = force
     })
     if not input_belt then
         game.print("Failed to create input belt for " .. belt.name)
@@ -51,40 +81,101 @@ local function on_linked_belt_built(event)
     input_belt.linked_belt_type = "input"
     input_belt.connect_linked_belts(belt)
 
+    local loader = storage.mining_surface.create_entity({
+        name = loader_name,
+        position = { x = spawn_x, y = 2 },
+        direction = defines.direction.north,
+        force = force
+    })
+
+    if not loader then
+        game.print("Failed to create loader for " .. belt.name)
+        input_belt.destroy()
+        return
+    end
+
+    linked_chest = storage.mining_surface.create_entity({
+        name = "linked-chest",
+        position = { x = spawn_x, y = 3 },
+        link_id = 42069,
+        force = force
+    })
+    if not linked_chest then
+        game.print("Failed to create linked chest for " .. belt.name)
+        input_belt.destroy()
+        loader.destroy()
+        return
+    end
+
     storage.belt_count = storage.belt_count + 1
-
-
-
-    -- local input = mining_surface.create_entity {
-    --     name = name,
-    --     position = { x = x, y = y },
-    --     direction = defines.direction.north,
-    --     force = player.force,
-    -- }
-    -- input.linked_belt_type = "input"
-
-
-    -- storage.nauvis_surface.create_entity()
-    -- local output = nauvis_surface.create_entity {
-    --     name = name,
-    --     position = { x = x, y = y },
-    --     direction = defines.direction.south,
-    -- }
-    -- output.linked_belt_type = "output"
-    -- output.destructible = false
-    -- output.operable = false
-    -- output.minable = false
-    -- output.rotatable = false
 end
 
 local function on_linked_belt_mined(event)
     game.print("Mined entity: " .. event.entity.name)
 end
 
-script.on_event(defines.events.on_built_entity, on_linked_belt_built, linked_belt_filter)
-script.on_event(defines.events.on_robot_built_entity, on_linked_belt_built, linked_belt_filter)
-script.on_event(defines.events.on_player_mined_entity, on_linked_belt_mined, linked_belt_filter)
-script.on_event(defines.events.on_robot_mined_entity, on_linked_belt_mined, linked_belt_filter)
+local function on_linked_chest_built(event)
+    -- register the linked chest so we can check contents on tick
+    table.insert(storage.sell_chests, event.entity)
+
+    local i = 0
+    for i, s in ipairs(storage.sell_chests) do
+        game.print(i)
+    end
+end
+
+local function on_linked_chest_mined(event)
+
+end
+
+local function on_built_entity(event)
+    if string.find(event.entity.name, "linked%-belt") then
+        on_linked_belt_built(event)
+    elseif string.find(event.entity.name, "linked%-chest") then
+        on_linked_chest_built(event)
+    end
+end
+
+local function on_tick(event)
+    local max_items_to_sell = 7
+    local items_removed = 0
+
+    if event.tick % 10 == 0 then
+        for i, chest in ipairs(storage.sell_chests) do
+            local inv = chest.get_inventory(defines.inventory.chest)
+            if inv.get_item_count() > 0 then
+                local contents = inv.get_contents()
+                for j, item_stack in ipairs(contents) do
+                    local remove_count = math.min(item_stack.count, max_items_to_sell - items_removed)
+                    inv.remove({ name = item_stack.name, count = remove_count })
+                    items_removed = items_removed + remove_count
+                    if items_removed == max_items_to_sell then
+                        return
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- capture events regarding creation/destruction of linked belts
+-- TODO: handle cases where the item is destroyed/lost
+--  - item placed in chest/wagon that is destroyed
+--  - player dies
+--  - item on ground is destroyed
+--  - dropped into space/lava
+script.on_event(defines.events.on_built_entity, on_built_entity)
+-- script.on_event(defines.events.on_robot_built_entity, on_linked_belt_built, linked_belt_event_filter)
+-- script.on_event(defines.events.on_player_mined_entity, on_linked_belt_mined, linked_belt_event_filter)
+-- script.on_event(defines.events.on_robot_mined_entity, on_linked_belt_mined, linked_belt_event_filter)
+
+-- capture events regarding creation/mining/destruction of linked chests
+-- script.on_event(defines.events.on_built_entity, on_linked_chest_built, linked_chest_event_filter)
+-- script.on_event(defines.events.on_robot_built_entity, on_linked_chest_built, linked_chest_event_filter)
+-- script.on_event(defines.events.on_player_mined_entity, on_linked_chest_mined, linked_chest_event_filter)
+-- script.on_event(defines.events.on_robot_mined_entity, on_linked_chest_mined, linked_chest_event_filter)
+
+script.on_event(defines.events.on_tick, on_tick)
 
 -- local buyables = {
 --     {
