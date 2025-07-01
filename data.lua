@@ -66,3 +66,5 @@ sell_chest_item.name = "sell-chest"
 sell_chest_item.order = "b[items]-e[sell-chest]"
 sell_chest_item.place_result = "sell-chest"
 data:extend({ sell_chest_item })
+
+data.raw["linked-container"]["linked-chest"].inventory_size = 1000
