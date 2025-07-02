@@ -1,14 +1,6 @@
 -- growth functions
 
 
----@enum
-types = {
-    0, 1
-}
-LINEAR = 0
-QUADRATIC = 1
-
-
 ---Sum of linear sequence from term n1 to n2 (inclusive)
 ---@param n1 integer term to start sequence at, >= 0
 ---@param n2 integer term to end sequence at, >= n1
@@ -47,15 +39,6 @@ function Linear:new(start, step)
     return this
 end
 
----Create a Quadratic growth
----@param start integer
----@param step integer
----@param step2 integer
----@return Quadratic
-function Quadratic.new(start, step, step2)
-    return { type = QUADRATIC, start = start, step = step, step2 = step2 }
-end
-
 --- Get the Nth value in this series
 ---@param n integer
 ---@return integer
@@ -71,20 +54,34 @@ function Linear:sum(start, num_terms)
     return self.start * num_terms + self.step * num_terms * (start + (start + num_terms)) / 2
 end
 
+---Create a Quadratic growth
+---@param start integer
+---@param step integer
+---@param step2 integer
+---@return Quadratic
+function Quadratic:new(start, step, step2)
+    this = { c = start, b = step, a = step2 }
+    setmetatable(this, self)
+    self.__index = self
+    return this
+end
+
 ---Sum of quadratic sequence from term a to a + n
----@param self Quadratic
 ---@param start_term integer
 ---@param num_terms integer
 ---@return integer
-function Quadratic.sum(self, start_term, num_terms)
+function Quadratic:sum(start_term, num_terms)
     return self.c * num_terms +
         self.b * lin_sum(start_term, start_term + num_terms) +
         self.a * quad_sum(start_term, start_term + num_terms)
 end
 
--- local l = Linear.new(10, 10)
-local l = Linear:new(10, 10)
-l:nth(10)
+---Get the Nth value in this series
+---@param n integer
+---@return integer
+function Quadratic:nth(n)
+    return self.a * n * n + self.b * n + self.c
+end
 
 return {
     linear = Linear,

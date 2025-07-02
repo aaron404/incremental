@@ -43,6 +43,12 @@ data:extend({
         name = "inc_toggle_interface",
         key_sequence = "CONTROL + E",
         order = "a"
+    },
+    {
+        type = "custom-input",
+        name = "inc_cheat",
+        key_sequence = "CONTROL + Q",
+        order = "a"
     }
 })
 

@@ -1,4 +1,5 @@
 local growth_funcs = require('growth_funcs')
+local shop_callbacks = require('shop_callbacks')
 
 local mapgen_settings = {
     autoplace_controls = {},
@@ -7,8 +8,32 @@ local mapgen_settings = {
     height = 256,
 }
 
+local function upgrade_linear(label, sprite, start, step)
+    local cost_func = growth_funcs.linear:new(start, step)
+    local upg = {
+        label = label,
+        sprite = sprite,
+        cost_func = cost_func,
+        current_cost = cost_func:nth(0),
+        level = 0,
+    }
+    return upg
+end
+
+local function upgrade_quadratic(label, sprite, a, b, c)
+    local cost_func = growth_funcs.quadratic:new(c, b, a)
+    local upg = {
+        label = label,
+        sprite = sprite,
+        cost_func = cost_func,
+        current_cost = cost_func:nth(0),
+        level = 0,
+    }
+    return upg
+end
+
 script.on_init(function()
-    storage.coins = 0
+    storage.money = 0
     storage.belt_count = 0
     storage.sell_chests = {}
     storage.nauvis_surface = game.get_surface("nauvis")
@@ -24,43 +49,56 @@ script.on_init(function()
         error("Could not create linked chest")
     end
 
-    local hflow = { type = "flow" }
-    hflow.children = {
-        { type = "sprite-button", sprite = "__base__/graphics/icons/iron-ore.png" },
-        { type = "label",         caption = "Iron Ore" },
-        { type = "label",         caption = "Rate" },
-        { type = "button",        caption = "buy iron",                           name = "buy_iron" },
-    }
-    storage.shop_ui = hflow
-    storage.show_ui = false
-    -- game.players[1].gui.top.add({ type = "button", caption = "Button" })
-
-    storage.ui_initialized = false
-
-    storage.resource_upgrades = {
-        iron_ore = {
-            label = "Iron Ore",
-            sprite = "item/iron-ore",
-            cost = growth_funcs.linear:new(10, 5),
-            level = 0
+    storage.upgrades = {
+        resource = {
+            label = "Resource Generation",
+            callback = "buy_res",
+            entries = {
+                iron    = upgrade_linear("Iron", "item/iron-ore", 10, 5),
+                coal    = upgrade_linear("Coal", "item/coal", 10, 5),
+                copper  = upgrade_linear("Copper", "item/copper-ore", 10, 5),
+                uranium = upgrade_linear("Uranium", "item/uranium-ore", 10, 5),
+            }
         },
-        coal = {
-            label = "Coal",
-            sprite = "item/coal",
-            cost = growth_funcs.linear:new(25, 10),
-            level = 0
-        },
-        copper_ore = {
-            label = "Copper Ore",
-            sprite = "item/copper-ore",
-            cost = growth_funcs.linear:new(20, 10),
-            level = 0
-        },
+        logistic = {
+            label = "Logistics",
+            callback = "buy_item",
+            entries = {
+                linked_belt = upgrade_quadratic("Supply Line", "item/underground-belt", 10000, 10000, 10000),
+                linked_chest = upgrade_quadratic("Shipping Crate", "item/linked-chest", 25000, 25000, 25000),
+            }
+        }
     }
 
-    storage.ui_res_buttons = {}
-    storage.ui_res_mult = 1
+    storage.ui = {}
+    storage.ui.money_label = {}
+    storage.ui.res_buttons = {}
+    storage.ui.log_buttons = {}
+    storage.ui.res_mult = 1
 end)
+
+local function generate_upg_section(section, flow, button_table)
+    subheader_flow = flow.add({ type = "flow", })
+    subheader_flow.add({ type = "label", caption = section.label })
+    subheader_flow.add({ type = "empty-widget", style = "draggable_space" })
+    -- add resource upgrades
+    local upgrade_flow = flow.add({ type = "flow", direction = "vertical" })
+    for key, entry in pairs(section.entries) do
+        local entry_flow = upgrade_flow.add({ type = "flow" })
+        entry_flow.add({ type = "sprite", sprite = entry.sprite })
+        entry_flow.add({ type = "label", caption = entry.label })
+        local caption = string.format("Buy Iron (%d x) [item=coin] %d", 1, entry.current_cost)
+        table.insert(button_table, entry_flow.add(
+            {
+                type = "button",
+                caption = caption,
+                tags = { key = key },
+                name = string.format("%s %s", section.callback, key),
+                enabled = storage.money >= entry.current_cost
+            }
+        ))
+    end
+end
 
 local function inc_toggle_interface(event)
     local player = game.get_player(event.player_index)
@@ -69,61 +107,57 @@ local function inc_toggle_interface(event)
         return
     end
 
-    if not storage.ui then
-        storage.ui = game.players[1].gui.screen.add({ type = "frame", visible = false })
-        local vflow = storage.ui.add({ type = "flow", direction = "vertical" })
+    if not storage.ui.root then
+        storage.ui.root = game.players[1].gui.screen.add({ type = "frame", visible = false })
+        local vflow = storage.ui.root.add({ type = "flow", direction = "vertical" })
         -- add header
         local header_flow = vflow.add({ type = "flow", })
-        header_flow.add({ type = "label", caption = "Resource Generation" })
-        header_flow.add({ type = "empty-widget", style = "draggable_space" })
-        -- add resource upgrades
-        local upgrade_flow = vflow.add({ type = "flow", direction = "vertical" })
-        for k, res in pairs(storage.resource_upgrades) do
-            local res_flow = upgrade_flow.add({ type = "flow", resource = k })
-            res_flow.add({ type = "sprite", sprite = res.sprite })
-            res_flow.add({ type = "label", caption = res.label })
-            local cost = res.cost:nth(res.level)
-            local caption = string.format("Buy Iron (%d x) [item=coin] %d", 1, cost)
-            table.insert(storage.ui_res_buttons, res_flow.add(
-                { type = "button", caption = caption, tags = { resource = k } }
-            ))
-        end
-        -- upgrade_flow.add({ type = "sprite-button", sprite = "item/iron-ore" })
-        -- upgrade_flow.add({ type = "label", caption = "Iron Ore" })
-        -- upgrade_flow.add({ type = "label", caption = "Rate" })
-        -- local upg = storage.resource_upgrades.iron_ore
-        -- local caption = "Buy Iron (x) [item=coin] " .. upg.cost:nth(upg.level)
-        -- upgrade_flow.add({ type = "button", caption = caption, name = "buy_iron" })
+        storage.ui.money_label = header_flow.add(
+            { type = "label", caption = string.format("Money: [item=coin] %d", 0) }
+        )
+
+        -- add upgrade sections
+        generate_upg_section(storage.upgrades.resource, vflow, storage.ui.res_buttons)
+        generate_upg_section(storage.upgrades.logistic, vflow, storage.ui.log_buttons)
+
         -- add footer
         local footer_flow = vflow.add({ type = "flow", style = "player_input_horizontal_flow" })
-        footer_flow.add({ type = "button", caption = "1x", style = "tool_button", name = "res_mult_1x" })
-        footer_flow.add({ type = "button", caption = "5x", style = "tool_button", name = "res_mult_5x" })
-        footer_flow.add({ type = "button", caption = "10x", style = "tool_button", name = "res_mult_10x" })
-        footer_flow.add({ type = "button", caption = "25x", style = "tool_button", name = "res_mult_25x" })
-        footer_flow.add({ type = "button", caption = "100x", style = "tool_button", name = "res_mult_100x" })
+        for mult in { 1, 5, 10, 25, 100 } do
+            footer_flow.add({
+                type = "button",
+                caption = string.format("%dx", mult),
+                style = "tool_button",
+                name = string.format("set_mult %d", mult)
+            })
+        end
     end
 
-    if storage.ui.visible then
-        -- player.gui.screen.children[1].destroy()
-        storage.ui.visible = false
-    else
-        storage.ui.visible = true
-    end
-    -- storage.show_ui = not storage.show_ui
+    storage.ui.root.visible = not storage.ui.root.visible
+end
 
-    -- player.gui.top.add { type = "label", name = "greeting", caption = "Hi" }
-    -- player.gui.top.greeting.caption = "Hello there!"
-    -- player.gui.top["greeting"].caption = "Actually, never mind, I don't like your face"
-    -- local tabbed_pane = player.gui.top.add { type = "tabbed-pane" }
-    -- local tab1 = tabbed_pane.add { type = "tab", caption = "Tab 1" }
-    -- local tab2 = tabbed_pane.add { type = "tab", caption = "Tab 2" }
-    -- local label1 = tabbed_pane.add { type = "label", caption = "Label 1" }
-    -- local label2 = tabbed_pane.add { type = "label", caption = "Label 2" }
-    -- tabbed_pane.add_tab(tab1, label1)
-    -- tabbed_pane.add_tab(tab2, label2)
+function add_money(amount)
+    storage.money = storage.money + amount
+    storage.ui.money_label.caption = string.format("Money: [item=coin] %d", storage.money)
+
+    for i, v in ipairs(storage.ui.res_buttons) do
+        local res = v.tags.key
+        local upg = storage.upgrades.resource.entries[res]
+        v.enabled = storage.money >= upg.current_cost
+    end
+
+    for i, v in ipairs(storage.ui.log_buttons) do
+        local log = v.tags.key
+        local upg = storage.upgrades.logistic.entries[log]
+        v.enabled = storage.money >= upg.current_cost
+    end
+end
+
+local function inc_cheat()
+    add_money(10000)
 end
 
 script.on_event("inc_toggle_interface", inc_toggle_interface)
+script.on_event("inc_cheat", inc_cheat)
 
 local function on_linked_belt_built(event)
     -- game.print("Built entity: " .. event.entity.name)
@@ -240,9 +274,9 @@ local function on_tick(event)
     end
 
     -- compute number of resources to spawn using inverse CDF of exponential distribution
-    if event.tick % 60 == 0 then
+    if event.tick % 1 == 0 then
         local e = expected_resource_rate / 60
-        local spawn_amt = -math.log(1 - math.random()) * 1 + rem
+        local spawn_amt = -math.log(1 - math.random()) * 1 / 60 + rem
         spawn_amt, rem = math.modf(spawn_amt)
 
         if spawn_amt > 0 then
@@ -252,57 +286,6 @@ local function on_tick(event)
         end
         -- game.print(string.format("Spawn amount: %d", math.floor(spawn_amt)))
     end
-end
-
-local function update_res_mult(mult)
-    for i, v in ipairs(storage.ui_res_buttons) do
-        local res = v.tags.resource
-        local upg = storage.resource_upgrades[res]
-        local cost = upg.cost:sum(upg.level, mult)
-        v.caption = string.format("[item=coin] %d", cost)
-    end
-end
-
-local function buy_iron()
-    game.print("buy iron")
-end
-
-local function res_mult_1x()
-    storage.ui_res_mult = 1
-    update_res_mult(1)
-end
-local function res_mult_5x()
-    storage.ui_res_mult = 5
-    update_res_mult(5)
-end
-local function res_mult_10x()
-    storage.ui_res_mult = 10
-    update_res_mult(10)
-end
-local function res_mult_25x()
-    storage.ui_res_mult = 25
-    update_res_mult(25)
-end
-local function res_mult_100x()
-    storage.ui_res_mult = 100
-    update_res_mult(100)
-end
-
-local gui_handlers = {
-    buy_iron = buy_iron,
-    res_mult_1x = res_mult_1x,
-    res_mult_5x = res_mult_5x,
-    res_mult_10x = res_mult_10x,
-    res_mult_25x = res_mult_25x,
-    res_mult_100x = res_mult_100x,
-}
-
-local function on_gui_click(event)
-    local name = event.element.name
-    if not name or name == "" then
-        return
-    end
-    gui_handlers[event.element.name]()
 end
 
 -- capture events regarding creation/destruction of linked belts
@@ -323,7 +306,6 @@ script.on_event(defines.events.on_built_entity, on_built_entity)
 -- script.on_event(defines.events.on_robot_mined_entity, on_linked_chest_mined, linked_chest_event_filter)
 
 script.on_event(defines.events.on_tick, on_tick)
-script.on_event(defines.events.on_gui_click, on_gui_click)
 
 -- local buyables = {
 --     {
