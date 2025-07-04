@@ -74,3 +74,19 @@ sell_chest_item.place_result = "sell-chest"
 data:extend({ sell_chest_item })
 
 data.raw["linked-container"]["linked-chest"].inventory_size = 1000
+data.raw["lane-splitter"]["lane-splitter"].speed = 0.125
+
+local coin_types = {
+    "stone", "rusted", "copper", "silver", "gold",
+    "platinum", "sapphire", "emerald", "ruby", "diamond",
+}
+
+for i, coin in ipairs(coin_types) do
+    local coin_item = util.table.deepcopy(data.raw["item"]["coin"])
+    coin_item.name = string.format("coin-%s", coin)
+    coin_item.stack_size = 100
+    coin_item.order = string.format("y-f%02d", i)
+    coin_item.icon = string.format("__incremental__/assets/coin-%s.png", coin)
+
+    data:extend({ coin_item })
+end

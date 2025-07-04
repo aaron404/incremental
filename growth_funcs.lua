@@ -51,7 +51,8 @@ end
 ---@param num_terms integer
 ---@return integer
 function Linear:sum(start, num_terms)
-    return self.start * num_terms + self.step * num_terms * (start + (start + num_terms)) / 2
+    -- return self.start * num_terms + self.step * num_terms * (start + (start + num_terms)) / 2
+    return num_terms * (self:nth(start) + self:nth(start + num_terms - 1)) / 2
 end
 
 ---Create a Quadratic growth
